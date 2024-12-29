@@ -1,0 +1,112 @@
+// Libraries
+#include <Servo.h>
+#include <Wire.h> 
+#include <LiquidCrystal_I2C.h>
+
+
+// Pins declaration
+#define LDR1 A0
+#define LDR2 A1
+#define error 10
+int Spoint = 0; // Initialize at stable position
+Servo servo;
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); 
+const int ledPin1 = 5;  
+const int ledPin2 = 6; 
+const int potPin = A2; 
+int sensorValue = 0;
+
+// Array of values
+int valuesArray[] = {30, 37, 29, 36, 42, 35}; 
+const int arraySize = sizeof(valuesArray) / sizeof(valuesArray[0]); 
+unsigned long previousCheckTime = 0; 
+const long checkInterval = 10000; 
+int currentIndex = 0; 
+
+// Timer variables for servo stopping
+unsigned long servoStopTime = 0;
+bool servoStopped = false; 
+const long stopDuration = 15000; 
+
+void setup() {
+  Serial.begin(9600); 
+  servo.attach(11);
+  servo.write(Spoint);
+  delay(1000);
+  lcd.begin(16, 2);         
+  lcd.backlight();     
+  pinMode(ledPin1, OUTPUT); 
+  pinMode(ledPin2, OUTPUT); 
+  lcd.setCursor(0, 0);  
+  lcd.print("Voltage:");
+}
+
+void loop() {
+  // Check the array every 10 seconds
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousCheckTime >= checkInterval) {
+    previousCheckTime = currentMillis; 
+    Serial.print("Current Wind Speedm(m/s): ");
+    Serial.println(valuesArray[currentIndex]); 
+
+    // Check if the current value is greater than 40
+    if (valuesArray[currentIndex] > 40) {
+      Serial.println("Servo Stopped at 0 degrees for 15 seconds due to value > 40");
+      servo.write(90); // Set to stable position (0 degrees)
+      servoStopped = true; 
+      servoStopTime = currentMillis; 
+    }
+
+    // Update index and wrap around if needed
+    currentIndex++;
+    if (currentIndex >= arraySize) {
+      currentIndex = 0; 
+    }
+  }
+
+  // If the servo is stopped, check if it's time to resume
+  if (servoStopped) {
+    if (currentMillis - servoStopTime >= stopDuration) {
+      Serial.println("Servo Activated again");
+      servoStopped = false; 
+    }
+  } else {
+    // Solar tracking within the range -60 to 60 degrees
+    int ldr1 = analogRead(LDR1);
+    int ldr2 = analogRead(LDR2);
+
+    int value1 = abs(ldr1 - ldr2);
+    int value2 = abs(ldr2 - ldr1);
+
+    if ((value1 <= error) || (value2 <= error)) {
+      // Do nothing if the error is within limits
+    } else {
+      // Adjust servo position based on LDR readings
+      if (ldr1 > ldr2) {
+        Spoint = constrain(Spoint - 1, -60, 60);
+      }
+      if (ldr1 < ldr2) {
+        Spoint = constrain(Spoint + 1, -60, 60);
+      }
+    }
+    
+    // Move the servo
+    servo.write(Spoint + 90); // Offset by 90 to stay in range
+    delay(80);
+  }
+
+  // Energy management
+  sensorValue = analogRead(potPin);          
+  float voltage = sensorValue * (5.0 / 1023.0);  
+
+  lcd.setCursor(0, 1);
+  lcd.print("                ");  
+  lcd.setCursor(0, 1);
+  lcd.print(voltage, 2);  
+
+  // Control LEDs based on voltage
+  digitalWrite(ledPin1, voltage > 4 ? HIGH : LOW);
+  digitalWrite(ledPin2, voltage > 3 ? HIGH : LOW);
+  
+  delay(100);
+}
